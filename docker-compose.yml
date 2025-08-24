@@ -1,0 +1,36 @@
+services:
+  bouncy:
+    build:
+      target: dev
+      context: .
+    tty: true
+    volumes:
+    - "./src:/app/src"
+    environment:
+    - "RUST_LOG=trace"
+    - "INTERFACE=eth1"
+    ports:
+    - "8080:8080"
+    - "80:80"
+    - "443:443"
+    networks:
+      - default
+      - lb_net
+
+  whoami1:
+    image: traefik/whoami
+    command:
+      - "--port=80"
+    networks:
+      - lb_net
+  whoami2:
+    image: traefik/whoami
+    command:
+      - "--port=80"
+    networks:
+      - lb_net
+
+networks:
+  default:
+  lb_net:
+    internal: true
