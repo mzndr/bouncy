@@ -1,13 +1,17 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
-use aya_log_ebpf::{debug, error, info, trace, warn};
-use bouncy_common::{
-    ETHER_HEADER_LEN, EtherType, EthernetHeader, IpV4Header, ProtocolType, TCPHeader,
+use aya_ebpf::{
+    bindings::xdp_action,
+    macros::{map, xdp},
+    maps::HashMap,
+    programs::XdpContext,
 };
+use aya_log_ebpf::{debug, error, trace};
+use net_types::{ETHER_HEADER_LEN, EtherType, EthernetHeader, IpV4Header, ProtocolType, TCPHeader};
 
 mod bouncy;
+mod net_types;
 
 #[xdp]
 pub fn bouncy(ctx: XdpContext) -> u32 {
@@ -16,6 +20,26 @@ pub fn bouncy(ctx: XdpContext) -> u32 {
         Err(_) => xdp_action::XDP_ABORTED,
     }
 }
+
+struct ConnectionIdentifier {
+    pub dest_ip: net_types::IpV4,
+    pub source_port: u16,
+}
+
+impl ConnectionIdentifier {
+    pub fn new(dest_ip: net_types::IpV4, source_port: u16) -> Self {
+        Self {
+            dest_ip,
+            source_port,
+        }
+    }
+}
+
+struct ConnectionState {}
+
+#[map]
+static mut CONNECTIONS: HashMap<ConnectionIdentifier, ConnectionState> =
+    HashMap::<ConnectionIdentifier, ConnectionState>::with_max_entries(1024, 0);
 
 fn try_bouncy(ctx: XdpContext) -> Result<u32, u32> {
     debug!(ctx, "parsing ethernet header");
