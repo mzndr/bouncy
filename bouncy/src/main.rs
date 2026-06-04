@@ -1,5 +1,12 @@
 use anyhow::Context as _;
-use aya::programs::{Xdp, XdpFlags};
+use aya::{
+    maps::{Map, MapData},
+    programs::{Xdp, XdpFlags},
+};
+use bouncy_common::{
+    config::{Config, Service, Target},
+    net_types::{IpV4, Port},
+};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
@@ -60,6 +67,28 @@ async fn main() -> anyhow::Result<()> {
     program.load()?;
     program.attach(&iface, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
+
+    let config = Config::new(
+        &[Target::new([127, 0, 0, 1])],
+        &[
+            Service::new(1337, 1337),
+            Service::new(1336, 1337),
+            Service::new(42069, 1337),
+        ],
+    );
+
+    let mut services =
+        aya::maps::HashMap::<_, Port, Service>::try_from(ebpf.map_mut("CONFIG_SERVICES").unwrap())?;
+    for s in config.services {
+        services.insert(s.source_port, s, 0)?;
+    }
+
+    let mut targets: aya::maps::HashMap<_, IpV4, Target> =
+        aya::maps::HashMap::try_from(ebpf.map_mut("CONFIG_TARGETS").unwrap())?;
+
+    for t in config.targets {
+        targets.insert(t.ip, t, 0).unwrap();
+    }
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");

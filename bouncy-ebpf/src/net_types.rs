@@ -1,11 +1,13 @@
+use aya_ebpf::programs::XdpContext;
+use aya_log_ebpf::trace;
+use bouncy_common::net_types::{IpV4, Port};
+
 pub const ETHER_TYPE_IPV4: u16 = 0x0800;
 pub const ETHER_HEADER_LEN: usize = 14;
 
 pub const PROTOCOL_TYPE_TCP: u8 = 6;
 
-pub type IpV4 = [u8; 4];
 pub type Mac = [u8; 6];
-pub type Port = u16;
 
 #[derive(Eq, PartialEq, PartialOrd)]
 pub enum EtherType {
@@ -86,6 +88,23 @@ pub struct TCPHeader {
     pub urgent_ptr: u16,
 }
 
+pub fn log_tcp_header(ctx: &XdpContext, ipv4_header: &IpV4Header, tcp_header: &TCPHeader) {
+    trace!(
+        &ctx,
+        "{}.{}.{}.{}:{}->{}.{}.{}.{}:{}",
+        ipv4_header.source[0],
+        ipv4_header.source[1],
+        ipv4_header.source[2],
+        ipv4_header.source[3],
+        tcp_header.source_port(),
+        ipv4_header.dest[0],
+        ipv4_header.dest[1],
+        ipv4_header.dest[2],
+        ipv4_header.dest[3],
+        tcp_header.dest_port(),
+    );
+}
+
 impl TCPHeader {
     pub fn source_port(&self) -> Port {
         u16::from_be(self.source_port_be)
@@ -95,11 +114,11 @@ impl TCPHeader {
         u16::from_be(self.dest_port_be)
     }
 
-    pub fn set_dest_port(&mut self, val: u16) {
+    pub fn set_dest_port(&mut self, val: Port) {
         self.dest_port_be = u16::to_be(val)
     }
 
-    pub fn set_source_port(&mut self, val: u16) {
+    pub fn set_source_port(&mut self, val: Port) {
         self.source_port_be = u16::to_be(val)
     }
 }

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(static_mut_refs)]
 
 use aya_ebpf::{
     bindings::xdp_action,
@@ -7,7 +8,11 @@ use aya_ebpf::{
     maps::HashMap,
     programs::XdpContext,
 };
-use aya_log_ebpf::{debug, error, trace};
+use aya_log_ebpf::{debug, error};
+use bouncy_common::{
+    config::{Service, Target},
+    net_types::{IpV4, Port},
+};
 use net_types::{ETHER_HEADER_LEN, EtherType, EthernetHeader, IpV4Header, ProtocolType, TCPHeader};
 
 mod bouncy;
@@ -22,12 +27,12 @@ pub fn bouncy(ctx: XdpContext) -> u32 {
 }
 
 struct ConnectionIdentifier {
-    pub dest_ip: net_types::IpV4,
-    pub source_port: u16,
+    pub dest_ip: bouncy_common::net_types::IpV4,
+    pub source_port: Port,
 }
 
 impl ConnectionIdentifier {
-    pub fn new(dest_ip: net_types::IpV4, source_port: u16) -> Self {
+    pub fn new(dest_ip: bouncy_common::net_types::IpV4, source_port: u16) -> Self {
         Self {
             dest_ip,
             source_port,
@@ -37,9 +42,16 @@ impl ConnectionIdentifier {
 
 struct ConnectionState {}
 
+// #[map]
+// static mut CONNECTIONS: HashMap<ConnectionIdentifier, ConnectionState> =
+//     HashMap::<ConnectionIdentifier, ConnectionState>::with_max_entries(1024, 0);
+
 #[map]
-static mut CONNECTIONS: HashMap<ConnectionIdentifier, ConnectionState> =
-    HashMap::<ConnectionIdentifier, ConnectionState>::with_max_entries(1024, 0);
+static mut CONFIG_TARGETS: HashMap<IpV4, Target> = HashMap::<IpV4, Target>::with_max_entries(64, 0);
+
+#[map]
+static mut CONFIG_SERVICES: HashMap<Port, Service> =
+    HashMap::<Port, Service>::with_max_entries(64, 0);
 
 fn try_bouncy(ctx: XdpContext) -> Result<u32, u32> {
     debug!(ctx, "parsing ethernet header");
@@ -69,15 +81,65 @@ fn try_bouncy(ctx: XdpContext) -> Result<u32, u32> {
         return Ok(xdp_action::XDP_PASS);
     };
 
-    log_tcp_header(&ctx, &ipv4_header, &tcp_header);
+    let ret = route_packet(&ctx, ipv4_header, tcp_header);
+    debug!(ctx, "done handling packet");
+    ret
+}
 
-    if tcp_header.source_port() != 1337 {
-        tcp_header.set_dest_port(1337);
-    } else {
-        tcp_header.set_source_port(1336);
+fn route_packet<'a>(
+    ctx: &'a XdpContext,
+    ipv4_header: &'a mut IpV4Header,
+    tcp_header: &'a mut TCPHeader,
+) -> Result<u32, u32> {
+    net_types::log_tcp_header(&ctx, &ipv4_header, &tcp_header);
+    // The packet is an outbound packet, if the source IP is one of the targets.
+    let is_outbound = unsafe { CONFIG_TARGETS.get(&ipv4_header.source) }.is_some();
+    if is_outbound {
+        debug!(ctx, "routing outbound package");
+        return route_outbound(ctx, ipv4_header, tcp_header);
     }
+    debug!(ctx, "routing inbound package");
+    return route_inbound(ctx, ipv4_header, tcp_header);
+}
 
-    log_tcp_header(&ctx, &ipv4_header, &tcp_header);
+fn route_outbound<'a>(
+    ctx: &'a XdpContext,
+    ipv4_header: &'a mut IpV4Header,
+    tcp_header: &'a mut TCPHeader,
+) -> Result<u32, u32> {
+    let service = match unsafe { CONFIG_SERVICES.get(&tcp_header.dest_port()) } {
+        Some(svc) => {
+            debug!(ctx, "service for request found");
+            svc
+        }
+        None => {
+            debug!(ctx, "no service for request found");
+            return Ok(xdp_action::XDP_PASS);
+        }
+    };
+
+    tcp_header.set_source_port(service.dest_port);
+
+    Ok(xdp_action::XDP_PASS)
+}
+
+fn route_inbound<'a>(
+    ctx: &'a XdpContext,
+    ipv4_header: &'a mut IpV4Header,
+    tcp_header: &'a mut TCPHeader,
+) -> Result<u32, u32> {
+    let service = match unsafe { CONFIG_SERVICES.get(&tcp_header.dest_port()) } {
+        Some(svc) => {
+            debug!(ctx, "service for request found");
+            svc
+        }
+        None => {
+            debug!(ctx, "no service for request found");
+            return Ok(xdp_action::XDP_PASS);
+        }
+    };
+
+    tcp_header.set_dest_port(service.source_port);
 
     Ok(xdp_action::XDP_PASS)
 }
@@ -123,7 +185,7 @@ fn read_ethernet_header(ctx: &XdpContext) -> Result<&'static EthernetHeader, Rea
     Ok(ptr_at(&ctx, 0)?)
 }
 
-fn read_ipv4_header(ctx: &XdpContext) -> Result<&'static IpV4Header, ReadError> {
+fn read_ipv4_header(ctx: &XdpContext) -> Result<&'static mut IpV4Header, ReadError> {
     Ok(ptr_at(&ctx, ETHER_HEADER_LEN)?)
 }
 
@@ -135,23 +197,6 @@ fn read_tcp_header(
         &ctx,
         ETHER_HEADER_LEN + ipv4_header.payload_offset(),
     )?)
-}
-
-fn log_tcp_header(ctx: &XdpContext, ipv4_header: &IpV4Header, tcp_header: &TCPHeader) {
-    trace!(
-        &ctx,
-        "{}.{}.{}.{}:{}->{}.{}.{}.{}:{}",
-        ipv4_header.source[0],
-        ipv4_header.source[1],
-        ipv4_header.source[2],
-        ipv4_header.source[3],
-        tcp_header.source_port(),
-        ipv4_header.dest[0],
-        ipv4_header.dest[1],
-        ipv4_header.dest[2],
-        ipv4_header.dest[3],
-        tcp_header.dest_port(),
-    );
 }
 
 #[unsafe(link_section = "license")]
