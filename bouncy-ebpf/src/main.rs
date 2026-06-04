@@ -10,7 +10,7 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{debug, error};
 use bouncy_common::{
-    config::{Service, Target},
+    config::{CONFIG_MAX_SERVICES, CONFIG_MAX_TARGETS, Service, Target},
     net_types::{IpV4, Port},
 };
 use net_types::{ETHER_HEADER_LEN, EtherType, EthernetHeader, IpV4Header, ProtocolType, TCPHeader};
@@ -47,11 +47,12 @@ struct ConnectionState {}
 //     HashMap::<ConnectionIdentifier, ConnectionState>::with_max_entries(1024, 0);
 
 #[map]
-static mut CONFIG_TARGETS: HashMap<IpV4, Target> = HashMap::<IpV4, Target>::with_max_entries(64, 0);
+static mut CONFIG_TARGETS: HashMap<IpV4, Target> =
+    HashMap::<IpV4, Target>::with_max_entries(CONFIG_MAX_TARGETS as u32, 0);
 
 #[map]
 static mut CONFIG_SERVICES: HashMap<Port, Service> =
-    HashMap::<Port, Service>::with_max_entries(64, 0);
+    HashMap::<Port, Service>::with_max_entries(CONFIG_MAX_SERVICES as u32, 0);
 
 fn try_bouncy(ctx: XdpContext) -> Result<u32, u32> {
     debug!(ctx, "parsing ethernet header");
