@@ -1,5 +1,10 @@
 # bouncy
 
+Building a layer 4 network load balancer to learn about eBPF, XDP 
+and linux networking in general. Worst practices and antipatterns guaranteed!
+
+---
+
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
