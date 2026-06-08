@@ -8,7 +8,7 @@ use aya_ebpf::{
     maps::HashMap,
     programs::XdpContext,
 };
-use aya_log_ebpf::{debug, error};
+use aya_log_ebpf::{debug, error, trace};
 use bouncy_common::{
     config::{CONFIG_MAX_SERVICES, CONFIG_MAX_TARGETS, Service, Target},
     net_types::{IpV4, Port},
@@ -55,35 +55,35 @@ static mut CONFIG_SERVICES: HashMap<Port, Service> =
     HashMap::<Port, Service>::with_max_entries(CONFIG_MAX_SERVICES as u32, 0);
 
 fn try_bouncy(ctx: XdpContext) -> Result<u32, u32> {
-    debug!(ctx, "parsing ethernet header");
+    trace!(ctx, "parsing ethernet header");
     let Ok(ethernet_header) = read_ethernet_header(&ctx).inspect_err(|e| e.log(&ctx)) else {
         return Ok(xdp_action::XDP_PASS);
     };
 
-    debug!(ctx, "getting ether type");
+    trace!(ctx, "getting ether type");
     if ethernet_header.get_ether_type() != EtherType::IpV4 {
-        debug!(ctx, "payload not of type ipv4");
+        trace!(ctx, "payload not of type ipv4");
         return Ok(xdp_action::XDP_PASS);
     };
 
-    debug!(ctx, "parsing ipv4 header");
+    trace!(ctx, "parsing ipv4 header");
     let Ok(ipv4_header) = read_ipv4_header(&ctx).inspect_err(|e| e.log(&ctx)) else {
         return Ok(xdp_action::XDP_PASS);
     };
 
-    debug!(ctx, "checking ipv4 payload protocol");
+    trace!(ctx, "checking ipv4 payload protocol");
     if ipv4_header.protocol_type() != ProtocolType::TCP {
-        debug!(ctx, "payload not of type TCP");
+        trace!(ctx, "payload not of type TCP");
         return Ok(xdp_action::XDP_PASS);
     }
 
-    debug!(ctx, "reading TCP header");
+    trace!(ctx, "reading TCP header");
     let Ok(tcp_header) = read_tcp_header(&ctx, &ipv4_header).inspect_err(|e| e.log(&ctx)) else {
         return Ok(xdp_action::XDP_PASS);
     };
 
     let ret = route_packet(&ctx, ipv4_header, tcp_header);
-    debug!(ctx, "done handling packet");
+    trace!(ctx, "done handling packet");
     ret
 }
 
@@ -96,10 +96,8 @@ fn route_packet<'a>(
     // The packet is an outbound packet, if the source IP is one of the targets.
     let is_outbound = unsafe { CONFIG_TARGETS.get(&ipv4_header.source) }.is_some();
     if is_outbound {
-        debug!(ctx, "routing outbound package");
         return route_outbound(ctx, ipv4_header, tcp_header);
     }
-    debug!(ctx, "routing inbound package");
     return route_inbound(ctx, ipv4_header, tcp_header);
 }
 
@@ -110,11 +108,11 @@ fn route_outbound<'a>(
 ) -> Result<u32, u32> {
     let service = match unsafe { CONFIG_SERVICES.get(&tcp_header.dest_port()) } {
         Some(svc) => {
-            debug!(ctx, "service for request found");
+            trace!(ctx, "service for request found");
             svc
         }
         None => {
-            debug!(ctx, "no service for request found");
+            trace!(ctx, "no service for request found");
             return Ok(xdp_action::XDP_PASS);
         }
     };
@@ -131,11 +129,11 @@ fn route_inbound<'a>(
 ) -> Result<u32, u32> {
     let service = match unsafe { CONFIG_SERVICES.get(&tcp_header.dest_port()) } {
         Some(svc) => {
-            debug!(ctx, "service for request found");
+            trace!(ctx, "service for request found");
             svc
         }
         None => {
-            debug!(ctx, "no service for request found");
+            trace!(ctx, "no service for request found");
             return Ok(xdp_action::XDP_PASS);
         }
     };

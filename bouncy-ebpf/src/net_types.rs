@@ -1,5 +1,5 @@
 use aya_ebpf::programs::XdpContext;
-use aya_log_ebpf::trace;
+use aya_log_ebpf::debug;
 use bouncy_common::net_types::{IpV4, Port};
 
 pub const ETHER_TYPE_IPV4: u16 = 0x0800;
@@ -89,7 +89,7 @@ pub struct TCPHeader {
 }
 
 pub fn log_tcp_header(ctx: &XdpContext, ipv4_header: &IpV4Header, tcp_header: &TCPHeader) {
-    trace!(
+    debug!(
         &ctx,
         "{}.{}.{}.{}:{}->{}.{}.{}.{}:{}",
         ipv4_header.source[0],
