@@ -1,0 +1,5 @@
+services:
+  jason-stinkt:
+    image: "traefik/whoami:v1.11"
+    ports:
+      - "1337:80"
